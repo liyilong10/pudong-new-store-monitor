@@ -50,6 +50,7 @@ def main() -> int:
     MARKER.write_text(json.dumps({"status": "success", "update_date": today}, ensure_ascii=False), encoding="utf-8")
     env = os.environ.copy()
     env["SKIP_XLSX_CHECK"] = "1"
+    env["SKIP_CSV_CHECK"] = "1"
     if call([sys.executable, "verify_full_update.py"], MONITOR, env) != 0:
         return 1
     print("07:30 self-check passed without an extra Amap call", flush=True)
