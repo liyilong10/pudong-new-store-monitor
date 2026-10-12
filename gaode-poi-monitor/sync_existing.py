@@ -30,8 +30,10 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 def main() -> int:
     base = Path(__file__).resolve().parent
     cfg = load_config(base / "config.json")
-    poi_rows = read_csv(base / "exports" / "poi_latest.csv")
-    daily_dicts = read_csv(base / "exports" / "daily_summary_history.csv")
+    poi_path = base / "exports" / "poi_latest.csv"
+    daily_path = base / "exports" / "daily_summary_history.csv"
+    poi_rows = read_csv(poi_path) if poi_path.exists() else []
+    daily_dicts = read_csv(daily_path) if daily_path.exists() else []
     if not poi_rows:
         conn = sqlite3.connect(base / cfg["storage"]["sqlite_path"])
         conn.row_factory = sqlite3.Row
