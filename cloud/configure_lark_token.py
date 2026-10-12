@@ -22,6 +22,8 @@ with urllib.request.urlopen(req, timeout=30) as resp:
     payload = json.load(resp)
 if payload.get("code") != 0 or not payload.get("tenant_access_token"):
     raise SystemExit(f"Feishu token exchange failed: code={payload.get('code')} msg={payload.get('msg')}")
+token = payload["tenant_access_token"]
+print(f"::add-mask::{token}")
 with Path(GITHUB_ENV).open("a", encoding="utf-8") as f:
-    f.write("LARKSUITE_CLI_TENANT_ACCESS_TOKEN=" + payload["tenant_access_token"] + "\n")
+    f.write("LARKSUITE_CLI_TENANT_ACCESS_TOKEN=" + token + "\n")
 print("Feishu bot token configured")
