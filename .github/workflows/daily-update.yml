@@ -1,0 +1,61 @@
+name: Daily POI Update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 23 * * *" # 07:00 Asia/Shanghai
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  TZ: Asia/Shanghai
+  AMAP_WEB_KEY: ${{ secrets.AMAP_WEB_KEY }}
+  LARKSUITE_CLI_APP_ID: ${{ secrets.LARKSUITE_CLI_APP_ID }}
+  LARKSUITE_CLI_APP_SECRET: ${{ secrets.LARKSUITE_CLI_APP_SECRET }}
+  STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
+
+concurrency:
+  group: pudong-poi-production
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Feishu CLI
+        run: npx -y @larksuite/cli@latest install
+      - name: Restore encrypted database
+        run: bash cloud/state.sh decrypt
+      - name: Run tests
+        run: python -m unittest discover -s gaode-poi-monitor/tests -v
+      - name: Run full update and verify
+        run: python cloud/run_pipeline.py
+      - name: Save encrypted database
+        run: bash cloud/state.sh encrypt
+      - name: Persist encrypted state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/poi_monitor.db.enc
+          git diff --cached --quiet || git commit -m "chore: update encrypted POI state $(date +%F)"
+          git push
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: new-store-ops-dashboard/public
+      - id: deployment
+        uses: actions/deploy-pages@v4

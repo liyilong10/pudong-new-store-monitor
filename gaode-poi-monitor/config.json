@@ -1,0 +1,46 @@
+{
+  "amap": {
+    "key_env": "AMAP_WEB_KEY",
+    "page_size": 25,
+    "max_pages_per_query": 20,
+    "request_interval_seconds": 0.08,
+    "timeout_seconds": 20,
+    "retries": 4,
+    "grid_spacing_m": 2600,
+    "query_radius_m": 2000
+  },
+  "scope": {
+    "city": "上海市",
+    "district": "浦东新区",
+    "areas": [
+      {"name": "高行镇", "center_query": "上海市浦东新区高行镇人民政府", "coverage_radius_m": 4600},
+      {"name": "高桥镇", "center_query": "上海市浦东新区高桥镇人民政府", "coverage_radius_m": 5000},
+      {"name": "高东镇", "center_query": "上海市浦东新区高东镇人民政府", "coverage_radius_m": 4600},
+      {"name": "浦兴路街道", "center_query": "上海市浦东新区浦兴路街道办事处", "coverage_radius_m": 4200}
+    ],
+    "categories": [
+      {"name": "综合门店", "amap_typecode": "070000", "amap_type_name": "生活服务"},
+      {"name": "餐饮门店", "amap_typecode": "050000", "amap_type_name": "餐饮服务"},
+      {"name": "零售门店", "amap_typecode": "060000", "amap_type_name": "购物服务"}
+    ]
+  },
+  "classification": {
+    "inactive_after_missing_days": 3,
+    "keep_boundary_uncertain": true,
+    "address_high_confidence_tokens": {
+      "高行镇": ["高行", "东靖路", "金高路", "俱进路"],
+      "高桥镇": ["高桥", "外高桥", "花山路", "季景路", "慈善街"],
+      "高东镇": ["高东", "光明路", "高宝路", "赵高公路"],
+      "浦兴路街道": ["浦兴", "金桥路", "博兴路", "荷泽路", "长岛路"]
+    }
+  },
+  "storage": {
+    "sqlite_path": "data/poi_monitor.db",
+    "export_dir": "exports"
+  },
+  "lark": {
+    "spreadsheet_url": "https://bytedance.larkoffice.com/sheets/BEdas6XmMh4EzBtdvFVcJg4qnBd",
+    "sync_enabled": true,
+    "chart_titles": ["每周疑似新店：分区域", "每周疑似新店：分品类"]
+  }
+}

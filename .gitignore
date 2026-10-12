@@ -1,0 +1,14 @@
+# Local secrets and generated data
+.env
+*.log
+**/__pycache__/
+**/*.pyc
+gaode-poi-monitor/data/*.db
+gaode-poi-monitor/data/*.db-*
+gaode-poi-monitor/data/last_full_update.json
+gaode-poi-monitor/exports/
+new-store-ops-dashboard/public/index.html
+new-store-ops-dashboard/public/*.xlsx
+# Only encrypted state may be committed
+state/*
+!state/poi_monitor.db.enc
