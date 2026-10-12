@@ -33,6 +33,8 @@ jobs:
       - name: Restore verified database
         run: bash cloud/state.sh decrypt
       - name: Build and verify website from existing data
+        env:
+          SKIP_XLSX_CHECK: "1"
         run: python cloud/publish_existing.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

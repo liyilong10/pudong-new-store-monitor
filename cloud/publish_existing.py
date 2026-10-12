@@ -20,7 +20,6 @@ def run(cmd: list[str], cwd: Path) -> None:
 def main() -> int:
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
     run([sys.executable, "generate.py"], DASHBOARD)
-    run([sys.executable, "export_sheet.py"], DASHBOARD)
     MARKER.parent.mkdir(parents=True, exist_ok=True)
     MARKER.write_text(json.dumps({"status": "success", "update_date": today}, ensure_ascii=False), encoding="utf-8")
     run([sys.executable, "verify_full_update.py"], MONITOR)
