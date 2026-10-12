@@ -1,0 +1,50 @@
+name: Verify Cloud Feishu Write
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  TZ: Asia/Shanghai
+  LARKSUITE_CLI_APP_ID: ${{ secrets.LARKSUITE_CLI_APP_ID }}
+  LARKSUITE_CLI_APP_SECRET: ${{ secrets.LARKSUITE_CLI_APP_SECRET }}
+  STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Feishu CLI
+        run: npx -y @larksuite/cli@latest install
+      - name: Configure Feishu bot token
+        run: python cloud/configure_lark_token.py
+      - name: Restore encrypted database
+        run: bash cloud/state.sh decrypt
+      - name: Sync verified existing data to Feishu
+        working-directory: gaode-poi-monitor
+        run: python sync_existing.py
+      - name: Rebuild verified website
+        env:
+          SKIP_XLSX_CHECK: "1"
+          SKIP_CSV_CHECK: "1"
+        run: python cloud/publish_existing.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: new-store-ops-dashboard/public
+      - id: deployment
+        uses: actions/deploy-pages@v4
