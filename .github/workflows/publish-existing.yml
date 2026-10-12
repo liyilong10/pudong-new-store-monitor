@@ -30,6 +30,10 @@ jobs:
           node-version: "22"
       - name: Install Feishu CLI
         run: npx -y @larksuite/cli@latest install
+      - name: Configure Feishu bot token
+        run: python cloud/configure_lark_token.py
+      - name: Verify Feishu sheet access
+        run: lark-cli sheets +workbook-info --url "https://feishu.doubao.com/sheets/BEdas6XmMh4EzBtdvFVcJg4qnBd"
       - name: Restore verified database
         run: bash cloud/state.sh decrypt
       - name: Build and verify website from existing data

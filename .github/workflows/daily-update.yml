@@ -38,6 +38,8 @@ jobs:
           node-version: "22"
       - name: Install Feishu CLI
         run: npx -y @larksuite/cli@latest install
+      - name: Configure Feishu bot token
+        run: python cloud/configure_lark_token.py
       - name: Restore encrypted database
         run: bash cloud/state.sh decrypt
       - name: Run tests
