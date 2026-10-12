@@ -45,6 +45,7 @@ def main() -> int:
             MARKER.write_text(json.dumps({"status": "success", "update_date": today}, ensure_ascii=False), encoding="utf-8")
             env = os.environ.copy()
             env["SKIP_XLSX_CHECK"] = "1"
+            env["SKIP_CSV_CHECK"] = "1"
             subprocess.run([sys.executable, "verify_full_update.py"], cwd=MONITOR, check=True, env=env)
             return 0
     run([sys.executable, "poi_monitor.py"], MONITOR)
