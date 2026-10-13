@@ -37,10 +37,10 @@ def database_is_current(today: str) -> bool:
 
 def main() -> int:
     today = today_cn()
-    # Hard quota guard: never call Amap twice for the same date.
+    # Hard quota guard: 07:30 never spends Amap quota after a failed 07:00 run.
     if not database_is_current(today):
-        print("Today's database snapshot is missing; running one repair fetch", flush=True)
-        return call([sys.executable, str(ROOT / "cloud" / "run_pipeline.py")], ROOT)
+        print("Today's database snapshot is missing; publish an explicit stale-data status without another Amap call", flush=True)
+        return call([sys.executable, str(ROOT / "cloud" / "publish_existing.py")], ROOT)
 
     print("Today's database snapshot already exists; skip Amap and rebuild deliverables", flush=True)
     if call([sys.executable, "sync_existing.py"], MONITOR) != 0:
