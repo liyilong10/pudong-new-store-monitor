@@ -8,6 +8,7 @@ from poi_monitor import (
     Area, build_grid, build_new_store_rows, haversine_m, init_db, persist_snapshot,
     select_budget_grid_points, verify_new_poi_townships, week_label,
 )
+from signal_radar import extract_store_name, init_signal_db, signal_score
 import datetime as dt
 import sqlite3
 
@@ -88,6 +89,25 @@ class MonitorTests(unittest.TestCase):
             persist_snapshot(conn, [], "2026-10-20", 3, partial_scan=True)
             self.assertEqual(conn.execute("SELECT status FROM poi_master WHERE poi_id='A'").fetchone()[0], "在库")
             conn.close()
+    def test_signal_radar_schema_and_scoring(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = sqlite3.connect(Path(td) / "x.db")
+            init_signal_db(conn)
+            self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE name='signal_candidate'").fetchone())
+            score = signal_score("高行镇某品牌新店试营业", "上海浦东东靖路门店开业", "高行镇", "2026-10-12T10:00:00+08:00", dt.date(2026, 10, 13))
+            self.assertGreaterEqual(score, 10)
+            self.assertEqual(extract_store_name("高行镇 某某咖啡 新店开业", "高行镇"), "某某咖啡")
+            conn.close()
+
+    def test_low_cost_budget_config(self):
+        import json
+        cfg = json.loads((Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
+        amap = cfg["amap"]
+        anchors = sum(len(v) for v in cfg["scope"]["anchor_keywords"].values())
+        normal_search = (amap["daily_hotspot_points"] * 3 + amap["daily_rotating_points"]) * amap["max_pages_per_query"] + anchors
+        radar_cap = cfg["signal_radar"]["max_amap_requests"]
+        self.assertLessEqual(normal_search, 40)
+        self.assertLessEqual((normal_search + radar_cap) * 30, 5000)
 
 
 if __name__ == "__main__":

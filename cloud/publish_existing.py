@@ -20,6 +20,8 @@ def run(cmd: list[str], cwd: Path) -> None:
 
 def main() -> int:
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
+    # Refresh the separate public-signal sheet without spending Amap quota.
+    run([sys.executable, "signal_radar.py", "--no-amap"], MONITOR)
     run([sys.executable, "generate.py"], DASHBOARD)
     MARKER.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(MONITOR / "data" / "poi_monitor.db")

@@ -77,7 +77,10 @@ class AmapClient:
                     raise MonitorError(f"高德接口失败: {payload.get('infocode')} {payload.get('info')}")
                 time.sleep(self.interval)
                 return payload
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, MonitorError) as exc:
+            except MonitorError:
+                # Business errors (quota, invalid request, permission) are deterministic; retrying wastes quota.
+                raise
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt + 1 < self.retries:
                     time.sleep(2 ** attempt)
@@ -96,6 +99,18 @@ class AmapClient:
             raise MonitorError(f"无法定位区域中心：{structured_keyword}")
         lng, lat = str(pois[0]["location"]).split(",", 1)
         return float(lng), float(lat)
+
+    def text_search(self, keyword: str, district: str, typecode: str, page_size: int = 25) -> list[dict[str, Any]]:
+        payload = self.get(AMAP_TEXT_URL, {
+            "keywords": keyword,
+            "region": district,
+            "city_limit": "true",
+            "types": typecode,
+            "page_size": page_size,
+            "page_num": 1,
+            "show_fields": "business",
+        })
+        return payload.get("pois") or []
 
     def around(self, lng: float, lat: float, radius: int, typecode: str, page_size: int, max_pages: int) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -777,8 +792,17 @@ def collect(
                 lng, lat, int(amap_cfg["query_radius_m"]), merged_types,
                 int(amap_cfg["page_size"]), int(amap_cfg["max_pages_per_query"]),
             ))
-    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_scan_mode','重点每日+普通轮换')")
+
+    # Low-cost commercial anchors: one text-search page per mall/road keyword.
+    # They discover candidates only; new POIs still require strict reverse-geocoded township verification.
+    anchor_count = 0
+    for _area, keywords in (scope.get("anchor_keywords") or {}).items():
+        for keyword in keywords:
+            absorb(client.text_search(str(keyword), str(scope["district"]), merged_types, int(amap_cfg["page_size"])))
+            anchor_count += 1
+    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_scan_mode','商业锚点+少量网格轮换')")
     conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_scan_points',?)", (str(len(points)),))
+    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_anchor_queries',?)", (str(anchor_count),))
     conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_amap_requests',?)", (str(client.request_count),))
     conn.commit()
     return list(dedup.values()), raw_count

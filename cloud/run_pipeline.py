@@ -48,7 +48,11 @@ def main() -> int:
             env["SKIP_CSV_CHECK"] = "1"
             subprocess.run([sys.executable, "verify_full_update.py"], cwd=MONITOR, check=True, env=env)
             return 0
+    # Zero-cost public signal collection runs first, so candidates are retained even if Amap quota is unavailable.
+    run([sys.executable, "signal_radar.py", "--no-amap", "--no-lark"], MONITOR)
     run([sys.executable, "poi_monitor.py"], MONITOR)
+    # Only after the core snapshot succeeds, verify a small number of candidates and sync the separate signal sheet.
+    run([sys.executable, "signal_radar.py"], MONITOR)
     run([sys.executable, "generate.py"], DASHBOARD)
     today = __import__("datetime").datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=8))).date().isoformat()
     MARKER.write_text(json.dumps({"status": "success", "update_date": today}, ensure_ascii=False), encoding="utf-8")
