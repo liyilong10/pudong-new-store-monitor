@@ -49,14 +49,25 @@ def load_data():
 
 def render():
     baseline, data_date, stores, stock = load_data()
+    current_date = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
+    data_is_stale = data_date != current_date
+    if data_is_stale:
+        for store in stores:
+            store["today"] = False
+            first = dt.date.fromisoformat(store["firstSeen"])
+            store["ageDay"] = (dt.date.fromisoformat(current_date) - first).days + 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(stores, ensure_ascii=False).replace("</", "<\\/")
     stock_json = json.dumps(stock, ensure_ascii=False)
     total_today = sum(1 for s in stores if s["today"])
     total_7d = sum(1 for s in stores if s["sevenDays"])
-    status_line = "今天是基线日，尚无可判定的新店" if data_date == baseline else f"今日识别 {total_today} 家，近7天累计 {total_7d} 家"
+    status_line = (
+        f"刷新失败，沿用 {data_date} 数据；今日新增暂不可判定"
+        if data_is_stale else
+        ("今天是基线日，尚无可判定的新店" if data_date == baseline else f"今日识别 {total_today} 家，近7天累计 {total_7d} 家")
+    )
     page = TEMPLATE.replace("__DATA__", payload).replace("__STOCK__", stock_json)
-    page = page.replace("__DATA_DATE__", html.escape(data_date)).replace("__BASELINE_DATE__", html.escape(baseline))
+    page = page.replace("__DATA_DATE__", html.escape(data_date)).replace("__CURRENT_DATE__", html.escape(current_date)).replace("__BASELINE_DATE__", html.escape(baseline))
     page = page.replace("__STATUS_LINE__", html.escape(status_line))
     OUT.write_text(page, encoding="utf-8")
 
@@ -78,7 +89,7 @@ TEMPLATE = r'''<!doctype html>
 </head>
 <body>
 <main class="shell">
-<header class="mast"><div><div class="eyebrow">New Store Operations Desk</div><h1>浦东四街镇<br>新店作战台</h1><p>高东 · 高行 · 高桥 · 浦兴路街道｜免费重点刷新：高密度网格每日扫描，其他网格轮换扫描</p></div><div class="stamp"><div class="date">__DATA_DATE__</div><div class="meta">每天 07:00 自动更新<br>基线日期 __BASELINE_DATE__<br>__STATUS_LINE__</div></div></header>
+<header class="mast"><div><div class="eyebrow">New Store Operations Desk</div><h1>浦东四街镇<br>新店作战台</h1><p>高东 · 高行 · 高桥 · 浦兴路街道｜免费重点刷新：高密度网格每日扫描，其他网格轮换扫描</p></div><div class="stamp"><div class="date">__CURRENT_DATE__</div><div class="meta">数据截至 __DATA_DATE__<br>每天 07:00 自动更新<br>基线日期 __BASELINE_DATE__<br>__STATUS_LINE__</div></div></header>
 <section class="area-strip" id="areaStrip"></section>
 <section class="today-kpis" aria-label="今日销售作业指标"><article class="kpi" style="--kpi-color:#2165d6"><div class="kpi-label">今日新增</div><div class="kpi-value" id="kpiToday">0</div><div class="kpi-note">今天首次发现的门店</div></article><article class="kpi" style="--kpi-color:#278466"><div class="kpi-label">有电话的新店</div><div class="kpi-value" id="kpiPhone">0</div><div class="kpi-note">可直接拨号联系</div></article><article class="kpi" style="--kpi-color:#674d91"><div class="kpi-label">高/中置信度新店</div><div class="kpi-value" id="kpiConfident">0</div><div class="kpi-note">归属明确，可优先作业</div></article><article class="kpi" style="--kpi-color:#f08c21"><div class="kpi-label">待核验新店</div><div class="kpi-value" id="kpiReview">0</div><div class="kpi-note">先核验地址与真实开业</div></article></section>
 <nav class="toolbar" aria-label="新店筛选"><div class="seg"><button class="active" data-period="today">今日新增</button><button data-period="seven">近 7 天</button><button data-period="all">15 天内全部新店</button></div><select id="areaFilter"><option value="all">全部街镇</option><option>高东镇</option><option>高行镇</option><option>高桥镇</option><option>浦兴路街道</option></select><select id="categoryFilter"><option value="all">全部类目</option><option>综合门店</option><option>零售门店</option><option>餐饮门店</option></select><input id="search" placeholder="搜索店名、电话或地址" aria-label="搜索店名、电话或地址"><a class="export-link" href="https://feishu.doubao.com/sheets/BEdas6XmMh4EzBtdvFVcJg4qnBd" target="_blank" rel="noopener">打开完整云表格</a><button class="export-button" id="exportCurrent">导出当前新店 CSV</button></nav>
