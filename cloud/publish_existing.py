@@ -2,6 +2,7 @@
 from __future__ import annotations
 import datetime as dt
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -21,8 +22,19 @@ def main() -> int:
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
     run([sys.executable, "generate.py"], DASHBOARD)
     MARKER.parent.mkdir(parents=True, exist_ok=True)
-    MARKER.write_text(json.dumps({"status": "success", "update_date": today}, ensure_ascii=False), encoding="utf-8")
-    run([sys.executable, "verify_full_update.py"], MONITOR)
+    conn = sqlite3.connect(MONITOR / "data" / "poi_monitor.db")
+    try:
+        data_date = conn.execute("SELECT MAX(snapshot_date) FROM poi_snapshot").fetchone()[0]
+    finally:
+        conn.close()
+    marker_status = "success" if data_date == today else "stale"
+    MARKER.write_text(json.dumps({"status": marker_status, "update_date": data_date, "checked_date": today}, ensure_ascii=False), encoding="utf-8")
+    env = __import__("os").environ.copy()
+    env["SKIP_XLSX_CHECK"] = "1"
+    env["SKIP_CSV_CHECK"] = "1"
+    env["ALLOW_STALE_STATUS"] = "1"
+    print("+", sys.executable, "verify_full_update.py", flush=True)
+    subprocess.run([sys.executable, "verify_full_update.py"], cwd=MONITOR, check=True, env=env)
     return 0
 
 

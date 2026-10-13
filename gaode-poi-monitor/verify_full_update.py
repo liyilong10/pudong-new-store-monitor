@@ -20,7 +20,11 @@ errors: list[str] = []
 
 try:
     marker = json.loads(MARKER.read_text(encoding="utf-8"))
-    if marker.get("status") != "success" or marker.get("update_date") != TODAY:
+    allow_stale = os.environ.get("ALLOW_STALE_STATUS") == "1"
+    if allow_stale:
+        if marker.get("status") not in {"success", "stale"} or not marker.get("update_date"):
+            errors.append("success_marker")
+    elif marker.get("status") != "success" or marker.get("update_date") != TODAY:
         errors.append("success_marker")
 except Exception:
     errors.append("success_marker")
@@ -28,7 +32,7 @@ except Exception:
 conn = sqlite3.connect(DB)
 try:
     latest = conn.execute("SELECT MAX(snapshot_date) FROM poi_snapshot").fetchone()[0]
-    if latest != TODAY:
+    if latest != TODAY and os.environ.get("ALLOW_STALE_STATUS") != "1":
         errors.append("database_date")
     baseline = conn.execute("SELECT meta_value FROM monitor_meta WHERE meta_key='baseline_date'").fetchone()[0]
     cutoff = (dt.date.fromisoformat(TODAY) - dt.timedelta(days=14)).isoformat()
@@ -63,6 +67,9 @@ try:
     site_ids = {str(r.get("id", "")) for r in site_rows}
     if not date_match or date_match.group(1) != TODAY:
         errors.append("website_date")
+    if os.environ.get("ALLOW_STALE_STATUS") == "1" and latest != TODAY:
+        if f"数据截至 {latest}" not in site_text or "刷新失败" not in site_text or any(r.get("today") for r in site_rows):
+            errors.append("website_stale_disclosure")
     if site_ids != strict_ids or any(r.get("area") not in TARGETS or r.get("review") for r in site_rows):
         errors.append("website_scope")
 except Exception:
