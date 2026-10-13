@@ -2,7 +2,10 @@
   "amap": {
     "key_env": "AMAP_WEB_KEY",
     "page_size": 25,
-    "max_pages_per_query": 20,
+    "max_pages_per_query": 4,
+    "max_requests_per_run": 180,
+    "daily_hotspot_points": 6,
+    "daily_rotating_points": 10,
     "request_interval_seconds": 0.08,
     "timeout_seconds": 20,
     "retries": 4,
@@ -13,10 +16,10 @@
     "city": "上海市",
     "district": "浦东新区",
     "areas": [
-      {"name": "高行镇", "center_query": "上海市浦东新区高行镇人民政府", "coverage_radius_m": 4600},
-      {"name": "高桥镇", "center_query": "上海市浦东新区高桥镇人民政府", "coverage_radius_m": 5000},
-      {"name": "高东镇", "center_query": "上海市浦东新区高东镇人民政府", "coverage_radius_m": 4600},
-      {"name": "浦兴路街道", "center_query": "上海市浦东新区浦兴路街道办事处", "coverage_radius_m": 4200}
+      {"name": "高行镇", "center_query": "上海市浦东新区高行镇人民政府", "center": [121.615460, 31.287812], "coverage_radius_m": 4600},
+      {"name": "高桥镇", "center_query": "上海市浦东新区高桥镇人民政府", "center": [121.575884, 31.342849], "coverage_radius_m": 5000},
+      {"name": "高东镇", "center_query": "上海市浦东新区高东镇人民政府", "center": [121.631972, 31.313276], "coverage_radius_m": 4600},
+      {"name": "浦兴路街道", "center_query": "上海市浦东新区浦兴路街道办事处", "center": [121.586983, 31.258025], "coverage_radius_m": 4200}
     ],
     "categories": [
       {"name": "综合门店", "amap_typecode": "070000", "amap_type_name": "生活服务"},

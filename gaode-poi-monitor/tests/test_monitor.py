@@ -4,7 +4,10 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from poi_monitor import build_grid, build_new_store_rows, haversine_m, init_db, persist_snapshot, week_label
+from poi_monitor import (
+    Area, build_grid, build_new_store_rows, haversine_m, init_db, persist_snapshot,
+    select_budget_grid_points, verify_new_poi_townships, week_label,
+)
 import datetime as dt
 import sqlite3
 
@@ -48,6 +51,42 @@ class MonitorTests(unittest.TestCase):
             persist_snapshot(conn, [base, second, outside], "2026-10-12", 3)
             active_names = {row[0] for row in build_new_store_rows(conn, "2026-10-12")}
             self.assertNotIn("范围外门店", active_names)
+            conn.close()
+    def test_budget_grid_is_bounded_and_rotates(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = sqlite3.connect(Path(td) / "x.db")
+            init_db(conn)
+            areas = [Area("高行镇", "", 4600, 121.61546, 31.287812)]
+            points1 = select_budget_grid_points(conn, areas, 2600, "2026-10-13", 2, 3)
+            points2 = select_budget_grid_points(conn, areas, 2600, "2026-10-14", 2, 3)
+            self.assertLessEqual(len(points1), 5)
+            self.assertLessEqual(len(points2), 5)
+            self.assertNotEqual(points1[2:], points2[2:])
+            conn.close()
+
+    def test_verified_area_is_preserved_on_rescan(self):
+        class NoRegeo:
+            def township(self, lng, lat):
+                raise AssertionError("existing POI must not call reverse geocode")
+        with tempfile.TemporaryDirectory() as td:
+            conn = sqlite3.connect(Path(td) / "x.db")
+            init_db(conn)
+            base = {"poi_id": "A", "name": "A店", "category": "餐饮门店", "amap_type": "餐饮服务", "typecode": "050000", "address": "", "province": "上海市", "city": "上海市", "district": "浦东新区", "area": "高行镇", "area_confidence": "高", "boundary_status": "乡镇核验", "longitude": 121.6, "latitude": 31.3, "tel": "", "business_area": "", "source": "高德地图Web服务API"}
+            persist_snapshot(conn, [base], "2026-10-10", 3)
+            rescanned = dict(base, area="范围待核验", area_confidence="低", boundary_status="待核验")
+            out = verify_new_poi_townships(conn, [rescanned], NoRegeo())
+            self.assertEqual(out[0]["area"], "高行镇")
+            self.assertEqual(out[0]["boundary_status"], "乡镇核验")
+            conn.close()
+
+    def test_partial_scan_does_not_mark_unseen_poi_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = sqlite3.connect(Path(td) / "x.db")
+            init_db(conn)
+            base = {"poi_id": "A", "name": "A店", "category": "餐饮门店", "amap_type": "餐饮服务", "typecode": "050000", "address": "", "province": "上海市", "city": "上海市", "district": "浦东新区", "area": "高行镇", "area_confidence": "高", "boundary_status": "乡镇核验", "longitude": 121.6, "latitude": 31.3, "tel": "", "business_area": "", "source": "高德地图Web服务API"}
+            persist_snapshot(conn, [base], "2026-10-10", 3)
+            persist_snapshot(conn, [], "2026-10-20", 3, partial_scan=True)
+            self.assertEqual(conn.execute("SELECT status FROM poi_master WHERE poi_id='A'").fetchone()[0], "在库")
             conn.close()
 
 

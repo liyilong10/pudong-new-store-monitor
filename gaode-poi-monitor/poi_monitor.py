@@ -52,13 +52,18 @@ class Area:
 
 
 class AmapClient:
-    def __init__(self, key: str, timeout: int = 20, retries: int = 4, interval: float = 0.08):
+    def __init__(self, key: str, timeout: int = 20, retries: int = 4, interval: float = 0.08, max_requests: int = 180):
         self.key = key
         self.timeout = timeout
         self.retries = retries
         self.interval = interval
+        self.max_requests = max_requests
+        self.request_count = 0
 
     def get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+        if self.request_count >= self.max_requests:
+            raise MonitorError(f"高德请求预算已用完: {self.request_count}/{self.max_requests}")
+        self.request_count += 1
         query = dict(params)
         query["key"] = self.key
         endpoint = f"{url}?{urllib.parse.urlencode(query)}"
@@ -154,6 +159,46 @@ def build_grid(lng: float, lat: float, coverage_radius_m: int, spacing_m: int) -
             if haversine_m(lng, lat, plng, plat) <= coverage_radius_m + spacing_m * 0.8:
                 points.append((plng, plat))
     return points
+
+
+def select_budget_grid_points(
+    conn: sqlite3.Connection,
+    areas: list[Area],
+    spacing_m: int,
+    snapshot_date: str,
+    hotspot_points: int,
+    rotating_points: int,
+) -> list[tuple[float, float]]:
+    """Select daily hotspots plus a deterministic rotating slice under a hard API budget."""
+    candidates: list[tuple[float, float]] = []
+    seen: set[tuple[int, int]] = set()
+    for area in areas:
+        for lng, lat in build_grid(area.lng or 0.0, area.lat or 0.0, area.coverage_radius_m, spacing_m):
+            key = (round(lng * 10000), round(lat * 10000))
+            if key not in seen:
+                seen.add(key)
+                candidates.append((lng, lat))
+    if not candidates:
+        return []
+
+    existing = [row for row in conn.execute(
+        "SELECT longitude,latitude FROM poi_master WHERE longitude IS NOT NULL AND latitude IS NOT NULL"
+    )]
+    scored: list[tuple[int, float, float]] = []
+    score_radius = spacing_m * 0.72
+    for lng, lat in candidates:
+        score = sum(1 for plng, plat in existing if haversine_m(lng, lat, float(plng), float(plat)) <= score_radius)
+        scored.append((score, lng, lat))
+    scored.sort(key=lambda x: (-x[0], x[1], x[2]))
+    hot = scored[: max(0, hotspot_points)]
+    rest = scored[max(0, hotspot_points):]
+    rotate_count = min(max(0, rotating_points), len(rest))
+    rotating: list[tuple[int, float, float]] = []
+    if rotate_count:
+        day_index = dt.date.fromisoformat(snapshot_date).toordinal()
+        start = (day_index * rotate_count) % len(rest)
+        rotating = [rest[(start + i) % len(rest)] for i in range(rotate_count)]
+    return [(lng, lat) for _, lng, lat in [*hot, *rotating]]
 
 
 def normalize_text(value: Any) -> str:
@@ -260,11 +305,15 @@ def normalize_poi(raw: dict[str, Any], category: str, area: str, confidence: str
 def verify_new_poi_townships(
     conn: sqlite3.Connection, pois: list[dict[str, Any]], client: AmapClient
 ) -> list[dict[str, Any]]:
-    existing = {row[0] for row in conn.execute("SELECT poi_id FROM poi_master")}
+    existing_rows = {
+        row[0]: (row[1], row[2], row[3])
+        for row in conn.execute("SELECT poi_id,area,area_confidence,boundary_status FROM poi_master")
+    }
     verified: list[dict[str, Any]] = []
     for poi in pois:
         item = dict(poi)
-        if item.get("poi_id") not in existing:
+        poi_id = item.get("poi_id")
+        if poi_id not in existing_rows:
             lng, lat = item.get("longitude"), item.get("latitude")
             if lng is None or lat is None:
                 item["area"] = "范围待核验"
@@ -280,11 +329,24 @@ def verify_new_poi_townships(
                     item["area"] = "范围待核验"
                     item["area_confidence"] = "低"
                     item["boundary_status"] = "待核验"
+        else:
+            item["area"], item["area_confidence"], item["boundary_status"] = existing_rows[poi_id]
         verified.append(item)
     return verified
 
 
-def persist_snapshot(conn: sqlite3.Connection, pois: list[dict[str, Any]], snapshot_date: str, missing_days: int) -> tuple[list[dict[str, Any]], int]:
+def build_full_export_from_master(conn: sqlite3.Connection, snapshot_date: str) -> list[dict[str, Any]]:
+    return [dict(zip(POI_COLUMNS, row)) for row in conn.execute("""
+        SELECT poi_id,name,category,amap_type,typecode,address,province,city,district,
+               area,area_confidence,boundary_status,longitude,latitude,tel,business_area,
+               first_seen_date,last_seen_date,
+               CASE WHEN first_seen_date=? THEN '是' ELSE '否' END,
+               status,source,?
+        FROM poi_master ORDER BY area,category,name
+    """, (snapshot_date, snapshot_date))]
+
+
+def persist_snapshot(conn: sqlite3.Connection, pois: list[dict[str, Any]], snapshot_date: str, missing_days: int, partial_scan: bool = False) -> tuple[list[dict[str, Any]], int]:
     previous_count = conn.execute("SELECT COUNT(*) FROM poi_snapshot").fetchone()[0]
     existing = {row[0] for row in conn.execute("SELECT poi_id FROM poi_master")}
     new_ids = {p["poi_id"] for p in pois if p["poi_id"] not in existing} if previous_count else set()
@@ -302,8 +364,9 @@ def persist_snapshot(conn: sqlite3.Connection, pois: list[dict[str, Any]], snaps
           last_seen_date=excluded.last_seen_date,status='在库',source=excluded.source
         """, (p["poi_id"], p["name"], p["category"], p["amap_type"], p["typecode"], p["address"], p["province"], p["city"], p["district"], p["area"], p["area_confidence"], p["boundary_status"], p["longitude"], p["latitude"], p["tel"], p["business_area"], first_seen, snapshot_date, "在库", p["source"]))
         conn.execute("INSERT OR REPLACE INTO poi_snapshot VALUES (?,?,?,?,?,?)", (snapshot_date, p["poi_id"], p["category"], p["area"], p["boundary_status"], payload_hash(p)))
-    cutoff = (dt.date.fromisoformat(snapshot_date) - dt.timedelta(days=missing_days)).isoformat()
-    conn.execute("UPDATE poi_master SET status='疑似消失' WHERE last_seen_date < ?", (cutoff,))
+    if not partial_scan:
+        cutoff = (dt.date.fromisoformat(snapshot_date) - dt.timedelta(days=missing_days)).isoformat()
+        conn.execute("UPDATE poi_master SET status='疑似消失' WHERE last_seen_date < ?", (cutoff,))
     baseline = conn.execute("SELECT meta_value FROM monitor_meta WHERE meta_key='baseline_date'").fetchone()
     if not baseline:
         conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('baseline_date', ?)", (snapshot_date,))
@@ -662,29 +725,62 @@ def sync_lark(base: Path, config: dict[str, Any], pois: list[dict[str, Any]], da
         tmp.unlink(missing_ok=True)
 
 
-def collect(config: dict[str, Any], client: AmapClient) -> tuple[list[dict[str, Any]], int]:
+def collect(
+    config: dict[str, Any], client: AmapClient, conn: sqlite3.Connection, snapshot_date: str
+) -> tuple[list[dict[str, Any]], int]:
     scope = config["scope"]
     amap_cfg = config["amap"]
     tokens = config["classification"]["address_high_confidence_tokens"]
     areas: list[Area] = []
     for item in scope["areas"]:
-        lng, lat = client.locate(item["center_query"], scope["district"])
+        if item.get("center") and len(item["center"]) == 2:
+            lng, lat = float(item["center"][0]), float(item["center"][1])
+        else:
+            lng, lat = client.locate(item["center_query"], scope["district"])
         areas.append(Area(item["name"], item["center_query"], int(item["coverage_radius_m"]), lng, lat))
+
+    points = select_budget_grid_points(
+        conn, areas, int(amap_cfg["grid_spacing_m"]), snapshot_date,
+        int(amap_cfg.get("daily_hotspot_points", 6)),
+        int(amap_cfg.get("daily_rotating_points", 10)),
+    )
+    category_by_prefix = {str(c["amap_typecode"])[:2]: str(c["name"]) for c in scope["categories"]}
+    merged_types = "|".join(str(c["amap_typecode"]) for c in scope["categories"])
+    hotspot_count = min(int(amap_cfg.get("daily_hotspot_points", 6)), len(points))
     dedup: dict[str, dict[str, Any]] = {}
     raw_count = 0
-    for area in areas:
-        grid = build_grid(area.lng or 0.0, area.lat or 0.0, area.coverage_radius_m, int(amap_cfg["grid_spacing_m"]))
-        for category in scope["categories"]:
-            for lng, lat in grid:
-                batch = client.around(lng, lat, int(amap_cfg["query_radius_m"]), category["amap_typecode"], int(amap_cfg["page_size"]), int(amap_cfg["max_pages_per_query"]))
-                raw_count += len(batch)
-                for raw in batch:
-                    if normalize_text(raw.get("adname")) != scope["district"]:
-                        continue
-                    assigned, confidence, boundary = classify_area(raw, areas, tokens)
-                    normalized = normalize_poi(raw, category["name"], assigned, confidence, boundary)
-                    if normalized["poi_id"]:
-                        dedup[normalized["poi_id"]] = normalized
+
+    def absorb(batch: list[dict[str, Any]], forced_category: str | None = None) -> None:
+        nonlocal raw_count
+        raw_count += len(batch)
+        for raw in batch:
+            if normalize_text(raw.get("adname")) != scope["district"]:
+                continue
+            prefix = normalize_text(raw.get("typecode"))[:2]
+            category = forced_category or category_by_prefix.get(prefix)
+            if not category:
+                continue
+            assigned, confidence, boundary = classify_area(raw, areas, tokens)
+            normalized = normalize_poi(raw, category, assigned, confidence, boundary)
+            if normalized["poi_id"]:
+                dedup[normalized["poi_id"]] = normalized
+
+    for index, (lng, lat) in enumerate(points):
+        if index < hotspot_count:
+            for category in scope["categories"]:
+                absorb(client.around(
+                    lng, lat, int(amap_cfg["query_radius_m"]), str(category["amap_typecode"]),
+                    int(amap_cfg["page_size"]), int(amap_cfg["max_pages_per_query"]),
+                ), str(category["name"]))
+        else:
+            absorb(client.around(
+                lng, lat, int(amap_cfg["query_radius_m"]), merged_types,
+                int(amap_cfg["page_size"]), int(amap_cfg["max_pages_per_query"]),
+            ))
+    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_scan_mode','重点每日+普通轮换')")
+    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_scan_points',?)", (str(len(points)),))
+    conn.execute("INSERT OR REPLACE INTO monitor_meta VALUES ('last_amap_requests',?)", (str(client.request_count),))
+    conn.commit()
     return list(dedup.values()), raw_count
 
 
@@ -707,10 +803,16 @@ def main() -> int:
     conn = sqlite3.connect(db_path)
     init_db(conn)
     try:
-        client = AmapClient(key, int(config["amap"]["timeout_seconds"]), int(config["amap"]["retries"]), float(config["amap"]["request_interval_seconds"]))
-        pois, raw_count = collect(config, client)
+        client = AmapClient(
+            key, int(config["amap"]["timeout_seconds"]), int(config["amap"]["retries"]),
+            float(config["amap"]["request_interval_seconds"]), int(config["amap"].get("max_requests_per_run", 180)),
+        )
+        pois, raw_count = collect(config, client, conn, snapshot_date)
         pois = verify_new_poi_townships(conn, pois, client)
-        persisted, new_count = persist_snapshot(conn, pois, snapshot_date, int(config["classification"]["inactive_after_missing_days"]))
+        scanned_rows, new_count = persist_snapshot(
+            conn, pois, snapshot_date, int(config["classification"]["inactive_after_missing_days"]), partial_scan=True
+        )
+        persisted = build_full_export_from_master(conn, snapshot_date)
         daily_rows, dashboard_rows, current_rows = aggregate_and_store_daily(persisted, snapshot_date, conn)
         new_store_rows = build_new_store_rows(conn, snapshot_date)
         new_store_summary = build_new_store_summary(new_store_rows)
